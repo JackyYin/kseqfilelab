@@ -22,23 +22,24 @@ static struct proc_dir_entry *pentry;
 
 static void *seqop_start(struct seq_file *s, loff_t *pos)
 {
-    struct list_head *cur;
+    struct list_head **cur;
 
-    pr_info("seqop_start, pos: %lld\n", *pos);
-    cur = kmalloc(sizeof(struct list_head), GFP_KERNEL);
-    if (!cur)
+    if (!s->private)
         return NULL;
 
-    cur = ((struct list_head *)&seqfile_list)->next;
+    pr_info("seqop_start, pos: %lld, ptr: %px\n", *pos, s->private);
+
+    cur = (struct list_head **)s->private;
+    *cur = ((struct list_head *)&seqfile_list)->next;
 
     if (*pos) {
         int offset = (*pos) % seqfile_list_len;
 
         for (; offset > 0; offset--)
-            cur = cur->next;
+            *cur = (*cur)->next;
     }
 
-    return (cur == &seqfile_list) ? NULL : cur;
+    return (*cur == &seqfile_list) ? NULL : *cur;
 }
 
 static void *seqop_next(struct seq_file *s, void *v, loff_t *pos)
@@ -49,13 +50,13 @@ static void *seqop_next(struct seq_file *s, void *v, loff_t *pos)
     (*pos)++;
     cur = cur->next;
 
-    return (cur == &seqfile_list) ? NULL : cur;
+    /* return (cur == &seqfile_list) ? NULL : cur; */
+    return cur;
 }
 
 static void seqop_stop(struct seq_file *s, void *v)
 {
-    pr_info("seqop_stop...\n");
-    kfree(v);
+    pr_info("seqop_stop..., v: %px\n", v);
 }
 
 static int seqop_show(struct seq_file *s, void *v)
@@ -69,6 +70,9 @@ static int seqop_show(struct seq_file *s, void *v)
         return -1;
 
     cur = v;
+    if (cur == &seqfile_list)
+        return -ENODATA;
+
     obj = container_of(cur, struct my_seq_struct, node);
     seq_printf(s, "%d\n", (int)obj->val);
     return 0;
@@ -84,13 +88,13 @@ static const struct seq_operations seq_ops = {
 static int seqfile_open(struct inode *inode, struct file *file)
 {
     pr_info("seq file opened...\n");
-    return seq_open(file, &seq_ops);
+    return seq_open_private(file, &seq_ops, sizeof(struct list_head *));
 }
 
 static const struct proc_ops seq_file_ops = {
     .proc_open    = seqfile_open,
     .proc_read    = seq_read,
-    .proc_lseek  = seq_lseek,
+    .proc_lseek   = seq_lseek,
     .proc_release = seq_release
 };
 
