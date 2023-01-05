@@ -14,7 +14,7 @@ struct my_seq_struct {
 
 static LIST_HEAD(seqfile_list);
 
-static long long seqfile_list_len = 0;
+static long long seqfile_list_len = 1;
 
 DEFINE_SPINLOCK(seqfile_list_spinlock);
 
@@ -34,12 +34,16 @@ static void *seqop_start(struct seq_file *s, loff_t *pos)
 
     if (*pos) {
         int offset = (*pos) % seqfile_list_len;
-
         for (; offset > 0; offset--)
             *cur = (*cur)->next;
     }
 
-    return (*cur == &seqfile_list) ? NULL : *cur;
+    if (*cur == &seqfile_list) {
+        *pos = 0;
+        *cur = (*cur)->next;
+    }
+    return *cur;
+    /* return (*cur == &seqfile_list) ? NULL : *cur; */
 }
 
 static void *seqop_next(struct seq_file *s, void *v, loff_t *pos)
@@ -50,8 +54,7 @@ static void *seqop_next(struct seq_file *s, void *v, loff_t *pos)
     (*pos)++;
     cur = cur->next;
 
-    /* return (cur == &seqfile_list) ? NULL : cur; */
-    return cur;
+    return (cur == &seqfile_list) ? NULL : cur;
 }
 
 static void seqop_stop(struct seq_file *s, void *v)
@@ -105,7 +108,7 @@ static int __init seqfile_init(void)
     pentry = proc_create("seqsample", 0, NULL, &seq_file_ops);
     INIT_LIST_HEAD(&seqfile_list);
 
-    for (; seqfile_list_len < 10; seqfile_list_len++) {
+    for (; seqfile_list_len <= 10; seqfile_list_len++) {
         struct my_seq_struct *obj = kzalloc(sizeof(struct my_seq_struct), GFP_KERNEL);
         if (!obj) {
             pr_info("failed to alloc...\n");
