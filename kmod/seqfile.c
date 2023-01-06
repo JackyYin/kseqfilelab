@@ -6,10 +6,11 @@
 #include <linux/spinlock.h>
 #include <linux/proc_fs.h> // proc_create API
 #include <linux/seq_file.h> // struct seq_operations
+#include <linux/kstrtox.h> // kstrtol
 
 struct my_seq_struct {
     struct list_head node;
-    int val;
+    long val;
 };
 
 static LIST_HEAD(seqfile_list);
@@ -18,7 +19,22 @@ static long long seqfile_list_len = 1;
 
 DEFINE_SPINLOCK(seqfile_list_spinlock);
 
-static struct proc_dir_entry *pentry;
+static struct proc_dir_entry *pentry_dir;
+static struct proc_dir_entry *pentry_sample;
+
+static int my_seq_insert(long val)
+{
+    struct my_seq_struct *obj = kzalloc(sizeof(struct my_seq_struct), GFP_KERNEL);
+    if (!obj) {
+        pr_info("failed to alloc...\n");
+        return -ENOMEM;
+    }
+
+    obj->val = val;
+    list_add_tail(&obj->node, &seqfile_list);
+    seqfile_list_len++;
+    return 0;
+}
 
 static void *seqop_start(struct seq_file *s, loff_t *pos)
 {
@@ -94,30 +110,66 @@ static int seqfile_open(struct inode *inode, struct file *file)
     return seq_open_private(file, &seq_ops, sizeof(struct list_head *));
 }
 
+
+static ssize_t seqfile_write(struct file * file, const char __user *buf, size_t count, loff_t *offset)
+{
+    char tmp[32] = {0};
+    long res;
+    int rc;
+
+    if (!count || count > sizeof(tmp))
+        return -EIO;
+
+    if (copy_from_user(tmp, buf, count)) {
+        pr_warn("copy_from_user failed...\n");
+        return -EIO;
+    }
+
+    if ((rc = kstrtol(tmp, 10, &res))) {
+        pr_warn("kstrtol failed...\n");
+        return rc;
+    }
+
+    if ((rc = my_seq_insert(res)))
+        return rc;
+
+    return count;
+}
+
 static const struct proc_ops seq_file_ops = {
     .proc_open    = seqfile_open,
     .proc_read    = seq_read,
+    .proc_write   = seqfile_write,
     .proc_lseek   = seq_lseek,
     .proc_release = seq_release
 };
+
+static bool procfs_init(void)
+{
+    pentry_dir = proc_mkdir("seqfilelab", NULL);
+    if (!pentry_dir) {
+        return false;
+    }
+
+    pentry_sample = proc_create("sample", 0, pentry_dir, &seq_file_ops);
+    if (!pentry_sample) {
+        proc_remove(pentry_dir);
+        return false;
+    }
+
+    return true;
+}
 
 static int __init seqfile_init(void)
 {
     pr_info("module init...\n");
 
-    pentry = proc_create("seqsample", 0, NULL, &seq_file_ops);
-    INIT_LIST_HEAD(&seqfile_list);
-
-    for (; seqfile_list_len <= 10; seqfile_list_len++) {
-        struct my_seq_struct *obj = kzalloc(sizeof(struct my_seq_struct), GFP_KERNEL);
-        if (!obj) {
-            pr_info("failed to alloc...\n");
-            return -1;
-        }
-
-        obj->val = seqfile_list_len;
-        list_add_tail(&obj->node, &seqfile_list);
+    if (!procfs_init()) {
+        pr_warn("failed to init procfs entry...\n");
+        return -1;
     }
+
+    INIT_LIST_HEAD(&seqfile_list);
 
     return 0;
 }
@@ -132,7 +184,8 @@ static void __exit seqfile_exit(void)
     }
     spin_unlock(&seqfile_list_spinlock);
 
-    proc_remove(pentry);
+    proc_remove(pentry_sample);
+    proc_remove(pentry_dir);
     pr_info("module exit...\n");
 }
 

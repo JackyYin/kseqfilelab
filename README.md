@@ -25,8 +25,18 @@ sudo insmod kmod/seqfile.ko
 
 ---
 
-## Step 3. Here we go
+## Step 3. Insert some number into file
 
 ```shell=
-cat /proc/seqsample
+echo 1 > /proc/seqfilelab/sample
+echo 2 > /proc/seqfilelab/sample
+echo 3 > /proc/seqfilelab/sample
+```
+
+---
+
+## Step 4. Read list from file
+
+```shell=
+cat /proc/seqfilelab/sample
 ```
